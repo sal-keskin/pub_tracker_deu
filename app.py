@@ -1,44 +1,5 @@
 import streamlit as st
 import pandas as pd
-import os
-import configparser
-from pathlib import Path
-
-# --- FIX: Create pybliometrics config file programmatically ---
-def setup_scopus_config():
-    # Define the directory and file path where pybliometrics looks for config
-    config_dir = Path.home() / ".config" / "pybliometrics"
-    config_dir.mkdir(parents=True, exist_ok=True)
-    config_path = config_dir / "config.ini"
-
-    # Only create the file if it doesn't exist to avoid overwriting
-    if not config_path.exists():
-        # Get key from Streamlit secrets (safest) or environment variable
-        try:
-            api_key = st.secrets.get("SCOPUS_API_KEY")
-        except FileNotFoundError:
-            # Secrets file might not exist locally
-            api_key = None
-
-        if not api_key:
-            api_key = os.environ.get("SCOPUS_API_KEY", "REPLACE_WITH_KEY_IF_TESTING_LOCALLY")
-
-        # Create the configuration parser
-        config = configparser.ConfigParser()
-        config.optionxform = str  # Preserve case sensitivity
-
-        config["Authentication"] = {"APIKey": api_key}
-
-        # Write the file
-        with open(config_path, "w") as f:
-            config.write(f)
-
-        print(f"✅ Scopus configuration created at: {config_path}")
-
-# Run this setup immediately
-setup_scopus_config()
-# -----------------------------------------------------------
-
 from scopus_service import ScopusService
 
 # Page Config
@@ -50,7 +11,7 @@ st.title("🔎 Scopus Publications Search")
 # Sidebar
 with st.sidebar:
     st.header("Settings")
-    api_key = st.text_input("Scopus API Key", type="password", help="Leave empty to use Mock Mode.")
+    api_key = st.text_input("Scopus API Key", type="password", help="Leave empty to use Mock Mode or Secrets.")
 
     st.markdown("---")
     st.caption("Credits")

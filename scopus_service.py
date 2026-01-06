@@ -1,15 +1,14 @@
 import os
 import requests
 import re
-from pybliometrics.scopus import ScopusSearch, CONFIG
-import pandas as pd
+import streamlit as st
 
 # Flag to force mock mode
 MOCK_MODE_ENV = os.environ.get("MOCK_MODE", "False").lower() == "true"
 
 class ScopusService:
     def __init__(self):
-        pass
+        self.base_url = "https://api.elsevier.com/content/search/scopus"
 
     def build_query(self, identifier, filters=None):
         if not filters:
@@ -48,87 +47,124 @@ class ScopusService:
         if not identifier and not filters.get("af_id"):
              return {"error": "Please provide at least an Author ID/ORCID OR an Affiliation ID."}
 
+        # Resolve API Key: Argument > Secrets > Env
+        if not api_key:
+            try:
+                api_key = st.secrets.get("SCOPUS_API_KEY")
+            except:
+                pass
+        if not api_key:
+            api_key = os.environ.get("SCOPUS_API_KEY")
+
         use_mock = MOCK_MODE_ENV or not api_key
         full_query = self.build_query(identifier, filters)
 
         if use_mock:
             return self._get_mock_data(full_query, limit, filters)
 
-        return self._fetch_with_pybliometrics(full_query, api_key, limit, filters.get("af_id"))
+        return self._fetch_from_api(full_query, api_key, limit, filters.get("af_id"))
 
-    def _fetch_with_pybliometrics(self, query, api_key, limit, target_af_id):
-        # Configure API Key temporarily
+    def _fetch_from_api(self, query, api_key, limit, target_af_id):
+        headers = {
+            "X-ELS-APIKey": api_key,
+            "Accept": "application/json"
+        }
+
+        params = {
+            "query": query,
+            "count": limit,
+            "view": "STANDARD", # STANDARD gives us most fields we need
+            "sort": "-coverDate"
+        }
+
         try:
-            # Check if keys are set, if not set them.
-            if api_key:
-                # Ensure Authentication section exists
-                if not CONFIG.has_section('Authentication'):
-                    CONFIG.add_section('Authentication')
-                CONFIG.set('Authentication', 'APIKey', api_key)
+            response = requests.get(self.base_url, headers=headers, params=params)
+            response.raise_for_status()
+            data = response.json()
+            return self._format_response(data, query, target_af_id)
+        except requests.exceptions.RequestException as e:
+            error_msg = str(e)
+            try:
+                # Try to parse Scopus XML/JSON error
+                if response is not None:
+                    error_json = response.json()
+                    if 'service-error' in error_json:
+                         error_msg = f"{error_json['service-error'].get('statusText', 'Error')}: {error_json['service-error'].get('statusMsg', '')}"
+            except:
+                pass
+            return {"error": error_msg, "query_used": query}
 
-            # ScopusSearch
-            # 'download' param is not valid for ScopusSearch in newer versions, removing it.
-            # We force subscriber=False to be safe if no key, but key is provided here.
-            s = ScopusSearch(query, count=limit, view="STANDARD", refresh=True)
+    def _format_response(self, data, query, target_af_id):
+        pubs = []
+        search_results = data.get("search-results", {})
+        total_results = int(search_results.get("opensearch:totalResults", 0))
+        entries = search_results.get("entry", [])
 
-            total_results = s.get_results_size()
-            results = s.results if s.results else []
+        if not isinstance(entries, list):
+             entries = [entries]
 
-            # Parse results
-            pubs = []
-            for res in results:
-                # Safely get attributes
-                title = getattr(res, 'title', 'N/A')
-                journal = getattr(res, 'publicationName', 'N/A')
-                date = getattr(res, 'coverDate', 'N/A')
-                year = date[:4] if date else 'N/A'
-                cited = getattr(res, 'citedby_count', 0)
-                doi = getattr(res, 'doi', 'N/A')
-                scopus_id = getattr(res, 'eid', 'N/A')
-                doctype = getattr(res, 'subtypeDescription', 'N/A')
+        for entry in entries:
+            # Extract fields
+            title = entry.get("dc:title", "N/A")
+            journal = entry.get("prism:publicationName", "N/A")
+            date_str = entry.get("prism:coverDate", "N/A")
+            year = date_str[:4] if date_str and len(date_str) >= 4 else "N/A"
+            cited = entry.get("citedby-count", "0")
+            doi = entry.get("prism:doi", "N/A")
+            scopus_id = entry.get("dc:identifier", "N/A").replace("SCOPUS_ID:", "")
+            doctype = entry.get("subtypeDescription", entry.get("subtype", "N/A"))
 
-                # Authors and Affiliation check
-                # 'afids' is usually a semi-colon separated string of Affiliation IDs
-                paper_afids = getattr(res, 'afids', '') or ''
-                has_target_affil = False
-                if target_af_id and paper_afids:
-                    if target_af_id in paper_afids.split(';'):
+            # Authors
+            # In STANDARD view, authors might not be fully listed or just 'dc:creator' (first author)
+            # Scopus Search API 'STANDARD' view usually has 'author' array? No, often just 'dc:creator'.
+            # 'COMPLETE' view has 'author'. But let's check what we get.
+            # If 'author' key exists (list of dicts), we use it.
+            authors_list = []
+            author_names_str = "N/A"
+            if 'author' in entry:
+                # Iterate authors
+                for auth in entry['author']:
+                    name = auth.get('authname', 'Unknown')
+                    authors_list.append(name)
+                author_names_str = "; ".join(authors_list)
+            elif 'dc:creator' in entry:
+                 author_names_str = entry['dc:creator']
+
+            # Affiliation Match
+            # Check 'affiliation' array in entry
+            has_target_affil = False
+            if target_af_id and 'affiliation' in entry:
+                affils = entry['affiliation']
+                if not isinstance(affils, list):
+                    affils = [affils]
+
+                for aff in affils:
+                    # check 'afid'
+                    if str(aff.get('afid')) == str(target_af_id):
                         has_target_affil = True
+                        break
 
-                # Authors
-                # 'author_names' is usually "Name1; Name2"
-                author_names = getattr(res, 'author_names', '') or ''
+            pubs.append({
+                "title": title,
+                "journal": journal,
+                "year": year,
+                "times_cited": cited,
+                "doctype": doctype,
+                "doi": doi,
+                "scopus_id": scopus_id,
+                "authors": author_names_str,
+                "has_target_affil": has_target_affil
+            })
 
-                pubs.append({
-                    "title": title,
-                    "journal": journal,
-                    "year": year,
-                    "times_cited": cited,
-                    "doctype": doctype,
-                    "doi": doi,
-                    "scopus_id": scopus_id,
-                    "authors": author_names,
-                    "has_target_affil": has_target_affil
-                })
-
-            return {
-                "publications": pubs,
-                "total_results": total_results,
-                "shown_results": len(pubs),
-                "source": "Scopus API (pybliometrics)",
-                "query_used": query
-            }
-
-        except Exception as e:
-            return {"error": str(e), "query_used": query}
-        finally:
-            # Security: Clear the API Key from memory after request
-            if CONFIG.has_option('Authentication', 'APIKey'):
-                CONFIG.remove_option('Authentication', 'APIKey')
+        return {
+            "publications": pubs,
+            "total_results": total_results,
+            "shown_results": len(pubs),
+            "source": "Scopus API (Requests)",
+            "query_used": query
+        }
 
     def _get_mock_data(self, query, limit, filters):
-        target_af = filters.get("af_id")
-
         # Generate enough mock items to test pagination logic
         total_mock = 120
         count = min(limit, total_mock)
@@ -142,7 +178,7 @@ class ScopusService:
                 "times_cited": 10 + i,
                 "doctype": "ar",
                 "doi": f"10.1016/mock.{i}",
-                "scopus_id": f"2-s2.0-{85000+i}",
+                "scopus_id": f"85000{i}",
                 "authors": "Keskin S.; Doe J.",
                 "has_target_affil": True # Simulate match
             })
@@ -151,6 +187,6 @@ class ScopusService:
             "publications": mock_pubs,
             "total_results": total_mock,
             "shown_results": count,
-            "source": "Mock Data (pybliometrics)",
+            "source": "Mock Data (Requests)",
             "query_used": query
         }

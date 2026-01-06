@@ -1,6 +1,6 @@
 # Scopus Publications Search (Streamlit)
 
-A simple **Streamlit** application to search for Scopus publications by Author ID or ORCID using `pybliometrics`.
+A simple **Streamlit** application to search for Scopus publications by Author ID or ORCID using the Elsevier Search API directly.
 
 ## Features
 - **Search**: Enter Author ID or ORCID.
@@ -12,7 +12,7 @@ A simple **Streamlit** application to search for Scopus publications by Author I
   - Validates if the retrieved paper actually involves your target affiliation.
   - Limits results to 25/50/100/1000 items to prevent API overuse.
 - **Modes**:
-  - **Live Mode**: Fetches real data using `pybliometrics` wrapper.
+  - **Live Mode**: Fetches real data using standard HTTP requests.
   - **Mock Mode**: Returns sample data if no API key is provided.
 
 ## Local Installation
@@ -51,6 +51,3 @@ To avoid entering your API key every time, you can add it to the App Secrets:
    SCOPUS_API_KEY = "your-actual-api-key-here"
    ```
 3. Save. The app will now use this key by default.
-
-### Notes on Pybliometrics Config
-This app dynamically injects your provided API key into the `pybliometrics` configuration for the session. It does not require a permanent `config.ini` file on the server.
