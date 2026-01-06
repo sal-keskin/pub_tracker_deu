@@ -1,6 +1,4 @@
 __pycache__/
 *.pyc
 venv/
-app.log
 .DS_Store
-gunicorn.log

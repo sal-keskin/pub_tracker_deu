@@ -67,6 +67,7 @@ class ScopusService:
             "view": "STANDARD"
         }
 
+        response = None
         try:
             response = requests.get(self.base_url, headers=headers, params=params)
             response.raise_for_status()

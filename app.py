@@ -1,40 +1,90 @@
-from flask import Flask, render_template, request
+import streamlit as st
+import pandas as pd
 from scopus_service import ScopusService
 
-app = Flask(__name__)
-service = ScopusService()
+# Page Config
+st.set_page_config(page_title="Scopus Search", layout="wide")
 
-@app.route('/')
-def index():
-    return render_template('index.html')
+# Title
+st.title("🔎 Scopus Publications Search")
 
-@app.route('/search', methods=['POST'])
-def search():
-    identifier = request.form.get('identifier')
+# Sidebar for API Key
+with st.sidebar:
+    st.header("Settings")
+    api_key = st.text_input("Scopus API Key", type="password", help="Leave empty to use Mock Mode.")
+    st.markdown("---")
+    st.info("If no API key is provided, the app will return mock data.")
+
+# Main Interface
+col1, col2 = st.columns([1, 2])
+
+with col1:
+    st.subheader("Search Criteria")
+    with st.form("search_form"):
+        identifier = st.text_input("Author ID or ORCID", placeholder="e.g. 7004212771 or 0000-0000-0000-0000")
+
+        with st.expander("Advanced Filters", expanded=True):
+            af_id = st.text_input("Affiliation ID (AF-ID)", value="60014930")
+            subj_area = st.text_input("Subject Area (SUBJAREA)", value="MEDI")
+
+            c1, c2 = st.columns(2)
+            with c1:
+                start_year = st.number_input("Start Year", value=2022, step=1)
+            with c2:
+                end_year = st.number_input("End Year", value=2027, step=1)
+
+            doctype = st.text_input("Document Type (DOCTYPE)", value="ar")
+
+        submit_button = st.form_submit_button("Search Publications", type="primary")
+
+# Logic
+if submit_button:
     if not identifier:
-        return render_template('index.html', error="Please provide an identifier.")
+        st.error("Please enter an Author ID or ORCID.")
+    else:
+        # Initialize Service
+        service = ScopusService()
 
-    api_key = request.form.get('api_key')
+        # Prepare Filters
+        filters = {
+            "af_id": af_id,
+            "subj_area": subj_area,
+            "start_year": start_year,
+            "end_year": end_year,
+            "doctype": doctype
+        }
 
-    # Collect filters
-    filters = {
-        "af_id": request.form.get('af_id'),
-        "subj_area": request.form.get('subj_area'),
-        "start_year": request.form.get('start_year'),
-        "end_year": request.form.get('end_year'),
-        "doctype": request.form.get('doctype')
-    }
+        # Fetch Data
+        with st.spinner("Fetching data..."):
+            result = service.get_publications(identifier, api_key=api_key, filters=filters)
 
-    result = service.get_publications(identifier, api_key=api_key, filters=filters)
+        # Display Results in col2
+        with col2:
+            st.subheader("Results")
 
-    if "error" in result:
-        return render_template('results.html', identifier=identifier, error=result['error'], source="Error")
+            if "error" in result:
+                st.error(f"Error: {result['error']}")
+                if "query_used" in result:
+                    st.code(result['query_used'], language="text")
+            else:
+                # Metadata
+                st.info(f"Data Source: **{result.get('source', 'Unknown')}**")
+                if "query_used" in result:
+                    with st.expander("View Query Used"):
+                        st.code(result['query_used'], language="text")
 
-    return render_template('results.html',
-                           identifier=identifier,
-                           publications=result.get('publications', []),
-                           source=result.get('source', 'Unknown'),
-                           query_used=result.get('query_used', ''))
-
-if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+                # Publications Table
+                pubs = result.get('publications', [])
+                if pubs:
+                    df = pd.DataFrame(pubs)
+                    # Rename columns for display
+                    df = df.rename(columns={
+                        "title": "Title",
+                        "journal": "Journal",
+                        "year": "Year",
+                        "times_cited": "Times Cited",
+                        "doctype": "Type"
+                    })
+                    st.dataframe(df, use_container_width=True, hide_index=True)
+                else:
+                    st.warning("No publications found matching these criteria.")
