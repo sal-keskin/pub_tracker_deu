@@ -5,7 +5,9 @@ A simple **Streamlit** application to search for Scopus publications by Author I
 ## Features
 - **Search**: Enter Author ID or ORCID.
 - **Filters**: Predefined but editable filters for Affiliation, Subject Area, Year, and Document Type.
-- **API Key**: Securely enter your Scopus API Key in the sidebar (per session).
+- **API Key**:
+  - Enter per session in the Sidebar.
+  - OR Configure securely via Streamlit Secrets.
 - **Advanced Logic**:
   - Validates if the retrieved paper actually involves your target affiliation.
   - Limits results to 25/50/100/1000 items to prevent API overuse.
@@ -39,6 +41,16 @@ A simple **Streamlit** application to search for Scopus publications by Author I
 3. Click **"New app"**.
 4. Select your repository, branch, and set the main file path to `app.py`.
 5. Click **"Deploy"**.
+
+### Adding API Key via Streamlit Secrets
+To avoid entering your API key every time, you can add it to the App Secrets:
+
+1. In your deployed app, click the menu in the top right -> **Settings** -> **Secrets**.
+2. Paste the following:
+   ```toml
+   SCOPUS_API_KEY = "your-actual-api-key-here"
+   ```
+3. Save. The app will now use this key by default.
 
 ### Notes on Pybliometrics Config
 This app dynamically injects your provided API key into the `pybliometrics` configuration for the session. It does not require a permanent `config.ini` file on the server.
