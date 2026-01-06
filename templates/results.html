@@ -11,6 +11,10 @@
         <h2 class="mb-4">Publications for {{ identifier }}</h2>
         <div class="alert alert-info">Data Source: {{ source }}</div>
 
+        {% if query_used %}
+        <div class="alert alert-secondary small">Query: {{ query_used }}</div>
+        {% endif %}
+
         {% if error %}
             <div class="alert alert-danger">{{ error }}</div>
         {% else %}
@@ -22,6 +26,7 @@
                                 <th>Title</th>
                                 <th>Journal</th>
                                 <th>Year</th>
+                                <th>Type</th>
                                 <th>Times Cited</th>
                             </tr>
                         </thead>
@@ -31,6 +36,7 @@
                                 <td>{{ pub.title }}</td>
                                 <td>{{ pub.journal }}</td>
                                 <td>{{ pub.year }}</td>
+                                <td>{{ pub.doctype }}</td>
                                 <td>{{ pub.times_cited }}</td>
                             </tr>
                             {% endfor %}
