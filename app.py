@@ -28,13 +28,13 @@ with col1:
 
             c1, c2 = st.columns(2)
             with c1:
-                start_year = st.number_input("Start Year", value=2022, step=1)
+                start_year = st.number_input("Start Year", value=2026, step=1)
             with c2:
-                end_year = st.number_input("End Year", value=2027, step=1)
+                end_year = st.number_input("End Year", value=2026, step=1)
 
             doctype = st.text_input("Document Type (DOCTYPE)", value="ar")
 
-            limit = st.select_slider("Max Results to Fetch", options=[25, 50, 100, 1000], value=25)
+            limit = st.select_slider("Max Results to Fetch", options=[50, 100], value=50)
 
         submit_button = st.form_submit_button("Search Publications", type="primary")
 
