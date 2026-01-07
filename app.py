@@ -13,9 +13,6 @@ with st.sidebar:
     st.header("Settings")
     api_key = st.text_input("Scopus API Key", type="password", help="Leave empty to use Mock Mode or Secrets.")
 
-    st.markdown("---")
-    st.caption("Credits")
-    st.markdown("**Salih Keskin, 2026**")
 
 # Main Interface
 col1, col2 = st.columns([1, 3])
