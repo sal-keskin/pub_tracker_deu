@@ -6,10 +6,10 @@ import altair as alt
 # Page Config
 st.set_page_config(page_title="Scopus Standard Search", layout="wide", page_icon="🔬")
 
-st.title("🔬 Scopus Search (Standard View)")
+st.title("🔬 Scopus Search (Dokuz Eylül University-Faculty of Medicine)")
 st.markdown("""
 Search using the **Standard API View**.  
-*Note: This view consumes less quota but provides only author names (no IDs).*
+*Note: This view only retrieves 25 articles per search and consumes less quota but provides only author names (no IDs).*
 """)
 
 # Sidebar for Credentials
@@ -26,7 +26,7 @@ st.subheader("Search Configuration")
 
 col1, col2, col3 = st.columns(3)
 with col1:
-    af_id = st.text_input("Affiliation ID (AF-ID)", value="60014930", help="e.g., 60014930 (Universiti Malaya)")
+    af_id = st.text_input("Affiliation ID (AF-ID)", value="60014930", help="e.g., 60014930 (Dokuz Eylül University)")
 with col2:
     subj_area = st.text_input("Subject Area (SUBJ)", value="MEDI", help="e.g., MEDI (Medicine), ENGI (Engineering)")
 with col3:
@@ -40,7 +40,7 @@ with col4:
         min_value=1, 
         max_value=200, 
         value=25,
-        help="How many articles to retrieve in one go. Max is 200."
+        help="How many articles to retrieve in one go. Max is high but we are limited 25 for free key."
     )
 with col5:
     start_index = st.number_input(
