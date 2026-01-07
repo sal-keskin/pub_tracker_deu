@@ -1,95 +1,120 @@
 import streamlit as st
 import requests
 import pandas as pd
+from datetime import datetime
 
 # Page Config
-st.set_page_config(page_title="Scopus Affiliation Search", layout="wide")
+st.set_page_config(page_title="Scopus Advanced Search", layout="wide", page_icon="🔬")
 
-st.title("🔍 Scopus Affiliation Search")
-st.markdown("A basic app to search for affiliations using the [Elsevier Scopus API](https://dev.elsevier.com/documentation/AFFILIATIONSearchAPI.wadl).")
+st.title("🔬 Scopus Scientific Search API")
+st.markdown("""
+Search for documents using the **Scopus Search API**.  
+*Fixes 'Unauthorized' errors by allowing Institutional Token input.*
+""")
 
-# Sidebar for API Configuration
+# Sidebar for Credentials
 with st.sidebar:
-    st.header("Configuration")
-    api_key = st.text_input("Enter Scopus API Key", type="password", help="Get your key from https://dev.elsevier.com/")
+    st.header("🔐 Credentials")
+    api_key = st.text_input("Scopus API Key", type="password", help="Required. Get from dev.elsevier.com")
+    inst_token = st.text_input("Institutional Token", type="password", help="Required if working off-campus (VPN often not enough).")
     
-    st.info("Note: You need an active Scopus API key to use this service.")
+    st.info("If you get a 401 Error, you likely need the Institutional Token.")
 
-# Main Search Interface
-query = st.text_input("Enter Affiliation Name (e.g., 'Oxford' or 'Harvard')", placeholder="Type affiliation name here...")
+# Main Search Parameters
+st.header("Search Parameters")
 
-if st.button("Search"):
+col1, col2, col3 = st.columns(3)
+
+with col1:
+    af_id = st.text_input("Affiliation ID (AF-ID)", value="60014930", help="e.g., 60014930 (Universiti Malaya)")
+with col2:
+    subj_area = st.text_input("Subject Area (SUBJ)", value="MEDI", help="e.g., MEDI, ENGI, COMP")
+with col3:
+    date_range = st.text_input("Date Range", value="2025-2026", help="Format: YYYY or YYYY-YYYY")
+
+col4, col5 = st.columns(2)
+with col4:
+    count = st.number_input("Count (Results per page)", min_value=1, max_value=200, value=25)
+with col5:
+    start_index = st.number_input("Start Index", min_value=0, value=0)
+
+# Construct Query Preview
+# We combine AF-ID and SUBJAREA into the 'query' string, and leave 'date' as a separate param
+query_string = f"AF-ID({af_id}) AND SUBJAREA({subj_area})"
+st.caption(f"**Generated Query:** `{query_string}`")
+
+if st.button("🚀 Run Search"):
     if not api_key:
-        st.error("❌ Please enter your API Key in the sidebar.")
-    elif not query:
-        st.warning("⚠️ Please enter a search term.")
+        st.error("❌ API Key is required.")
     else:
-        # API Endpoint and Headers
-        url = "https://api.elsevier.com/content/search/affiliation"
+        # API Endpoint
+        url = "https://api.elsevier.com/content/search/scopus"
+        
+        # Headers
         headers = {
             "X-ELS-APIKey": api_key,
             "Accept": "application/json"
         }
-        
-        # Construct the query parameter
-        # AFFIL() is the standard field for affiliation name searches
+        # Add InstToken if provided (Fixes 401)
+        if inst_token:
+            headers["X-ELS-Insttoken"] = inst_token
+            
+        # Parameters
         params = {
-            "query": f"AFFIL({query})",
-            "count": 25  # Number of results to return
+            "query": query_string,
+            "date": date_range,
+            "count": count,
+            "start": start_index,
+            "view": "STANDARD" # STANDARD gives more data than default
         }
 
-        with st.spinner("Searching Scopus..."):
+        with st.spinner("Fetching data from Scopus..."):
             try:
                 response = requests.get(url, headers=headers, params=params)
                 
                 if response.status_code == 200:
                     data = response.json()
-                    
-                    # Parse Results
                     search_results = data.get("search-results", {})
-                    entries = search_results.get("entry", [])
                     total_results = search_results.get("opensearch:totalResults", 0)
+                    entries = search_results.get("entry", [])
 
-                    st.success(f"Found {total_results} results.")
+                    st.success(f"✅ Success! Found {total_results} documents.")
 
                     if entries:
-                        # Process data into a clean list for DataFrame
+                        # Extract relevant fields
                         clean_data = []
                         for entry in entries:
-                            # Handle different response structures gracefully
-                            affil_name = entry.get("affiliation-name", "N/A")
-                            city = entry.get("city", "N/A")
-                            country = entry.get("country", "N/A")
-                            eid = entry.get("eid", "N/A")
-                            parent = entry.get("parent-affiliation-name", "N/A")
-                            
                             clean_data.append({
-                                "Affiliation Name": affil_name,
-                                "City": city,
-                                "Country": country,
-                                "Parent Institution": parent,
-                                "Scopus EID": eid
+                                "Title": entry.get("dc:title", "N/A"),
+                                "Authors": entry.get("dc:creator", "N/A"),
+                                "Journal": entry.get("prism:publicationName", "N/A"),
+                                "Date": entry.get("prism:coverDate", "N/A"),
+                                "DOI": entry.get("prism:doi", "N/A"),
+                                "Cited By": entry.get("citedby-count", "0"),
+                                "Type": entry.get("subtypeDescription", "N/A"),
+                                "Scopus ID": entry.get("dc:identifier", "").replace("SCOPUS_ID:", "")
                             })
-
+                        
                         df = pd.DataFrame(clean_data)
+                        
+                        # Display Data
                         st.dataframe(df, use_container_width=True)
                         
                         # Download Button
                         csv = df.to_csv(index=False).encode('utf-8')
                         st.download_button(
-                            "Download Results as CSV",
-                            csv,
-                            "scopus_affiliations.csv",
-                            "text/csv",
-                            key='download-csv'
+                            label="📥 Download CSV",
+                            data=csv,
+                            file_name=f"scopus_search_{af_id}_{subj_area}.csv",
+                            mime="text/csv"
                         )
                     else:
-                        st.write("No entries found for this query.")
-                
+                        st.warning("No documents found for this criteria.")
+
                 elif response.status_code == 401:
-                    st.error("❌ Unauthorized. Please check your API Key.")
+                    st.error("❌ **401 Unauthorized**: Please check your API Key. If you are off-campus, you **MUST** provide the Institutional Token.")
                 elif response.status_code == 429:
-                    st.error("❌ Quota exceeded. You have made too many requests.")
+                    st.error("❌ **429 Quota Exceeded**: You have used up your API limit.")
                 else:
                     st.error(f"❌ Error {response.status_code}: {response.text}")
 
