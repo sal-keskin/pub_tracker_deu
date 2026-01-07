@@ -6,7 +6,7 @@ import altair as alt
 # Page Config
 st.set_page_config(page_title="Scopus Standard Search", layout="wide", page_icon="🔬")
 
-st.title("🔬 Scopus Search (Dokuz Eylül University-Faculty of Medicine)")
+st.title("🔬 Scopus Search (DEU-Faculty of Medicine)")
 st.markdown("""
 Search using the **Standard API View**.  
 *Note: This view only retrieves 25 articles per search and consumes less quota but provides only author names (no IDs).*
