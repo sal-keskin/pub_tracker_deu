@@ -26,17 +26,29 @@ st.subheader("Search Configuration")
 
 col1, col2, col3 = st.columns(3)
 with col1:
-    af_id = st.text_input("Affiliation ID (AF-ID)", value="60014930")
+    af_id = st.text_input("Affiliation ID (AF-ID)", value="60014930", help="e.g., 60014930 (Universiti Malaya)")
 with col2:
-    subj_area = st.text_input("Subject Area (SUBJ)", value="MEDI")
+    subj_area = st.text_input("Subject Area (SUBJ)", value="MEDI", help="e.g., MEDI (Medicine), ENGI (Engineering)")
 with col3:
-    date_range = st.text_input("Date Range", value="2025-2026")
+    date_range = st.text_input("Date Range", value="2025-2026", help="Format: YYYY or YYYY-YYYY")
 
+# Pagination Controls with Explanations
 col4, col5 = st.columns(2)
 with col4:
-    count = st.number_input("Count", min_value=1, max_value=200, value=50)
+    count = st.number_input(
+        "Count (Results per page)", 
+        min_value=1, 
+        max_value=200, 
+        value=25,
+        help="How many articles to retrieve in one go. Max is 200."
+    )
 with col5:
-    start_index = st.number_input("Start Index", min_value=0, value=0)
+    start_index = st.number_input(
+        "Start Index (Offset)", 
+        min_value=0, 
+        value=0,
+        help="Use this to skip results. E.g., if Count is 25, set Start Index to 25 to see the second page."
+    )
 
 # Construct Query
 query_string = f"AF-ID({af_id}) AND SUBJAREA({subj_area})"
@@ -61,7 +73,7 @@ if st.button("🚀 Run Search"):
             "date": date_range,
             "count": count,
             "start": start_index,
-            "view": "STANDARD"  # <--- Back to STANDARD
+            "view": "STANDARD"
         }
 
         with st.spinner("Fetching standard metadata..."):
@@ -88,7 +100,6 @@ if st.button("🚀 Run Search"):
                                 cited_by = 0
 
                             # Handle Authors (Standard View Logic)
-                            # Standard view returns 'dc:creator' as a single string or list of names, no IDs.
                             authors = entry.get("dc:creator", "N/A")
                             if isinstance(authors, list):
                                 authors = "; ".join(authors)
@@ -99,7 +110,7 @@ if st.button("🚀 Run Search"):
                                 "Date": entry.get("prism:coverDate", "N/A"),
                                 "Cited By": cited_by,
                                 "DOI Link": doi_link,
-                                "Authors": authors, # Simple names only
+                                "Authors": authors,
                                 "Scopus ID": entry.get("dc:identifier", "").replace("SCOPUS_ID:", "")
                             })
                         
@@ -109,7 +120,7 @@ if st.button("🚀 Run Search"):
                         tab1, tab2 = st.tabs(["📄 Data View", "📊 Analytics"])
 
                         with tab1:
-                            st.subheader(f"Found {total_results} documents")
+                            st.subheader(f"Found {total_results} documents (Showing {len(df)})")
                             st.dataframe(
                                 df,
                                 use_container_width=True,
@@ -129,28 +140,41 @@ if st.button("🚀 Run Search"):
                             st.header("Visual Analysis")
                             
                             # 1. Top Cited
+                            st.subheader("🏆 Top Cited Articles")
                             top_cited = df.sort_values(by="Cited By", ascending=False).head(10)
+                            
                             chart_cited = alt.Chart(top_cited).mark_bar().encode(
-                                x=alt.X('Cited By', title='Citations'),
-                                y=alt.Y('Title', sort='-x', axis=alt.Axis(labels=False)),
+                                x=alt.X('Cited By', title='Citation Count'),
+                                y=alt.Y('Title', sort='-x', axis=alt.Axis(labels=False), title="Articles (Hover for details)"),
                                 tooltip=['Title', 'Cited By', 'Journal'],
                                 color=alt.value('#3182bd')
                             ).properties(height=300)
                             st.altair_chart(chart_cited, use_container_width=True)
 
-                            # 2. Trends
+                            st.divider()
+
+                            # 2. Trends (Months vs Count)
+                            st.subheader("📈 Publications per Month")
+                            
+                            # Process Dates
                             df["Date"] = pd.to_datetime(df["Date"], errors='coerce')
                             time_df = df.dropna(subset=["Date"])
+                            
                             if not time_df.empty:
-                                monthly = time_df.groupby(time_df["Date"].dt.to_period("M")).size().reset_index(name="Count")
-                                monthly["Date"] = monthly["Date"].astype(str)
+                                # Group by Month
+                                monthly = time_df.groupby(time_df["Date"].dt.to_period("M")).size().reset_index(name="Article Count")
+                                monthly["Month"] = monthly["Date"].astype(str) # Convert to string for chart labeling
+                                
                                 chart_trend = alt.Chart(monthly).mark_line(point=True).encode(
-                                    x=alt.X('Date', title='Month'),
-                                    y=alt.Y('Count'),
-                                    tooltip=['Date', 'Count'],
+                                    x=alt.X('Month', title='Month (Year-MM)'),
+                                    y=alt.Y('Article Count', title='Number of Articles'),
+                                    tooltip=['Month', 'Article Count'],
                                     color=alt.value('#e6550d')
                                 ).properties(height=300)
+                                
                                 st.altair_chart(chart_trend, use_container_width=True)
+                            else:
+                                st.info("Not enough date data available for trend analysis.")
 
                     else:
                         st.warning("No documents found.")
@@ -161,7 +185,6 @@ if st.button("🚀 Run Search"):
                     **Troubleshooting:**
                     1. **Institutional Token:** You are likely off-campus. You *must* enter an Institutional Token in the sidebar.
                     2. **API Key:** Verify your API Key is correct.
-                    3. **IP Address:** Even with a key, Scopus often blocks requests from residential IPs without a Token.
                     """)
                 else:
                     st.error(f"❌ Error {response.status_code}: {response.text}")
