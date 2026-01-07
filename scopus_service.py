@@ -2,6 +2,7 @@ import os
 import requests
 import re
 import streamlit as st
+import pandas as pd
 
 # Flag to force mock mode
 MOCK_MODE_ENV = os.environ.get("MOCK_MODE", "False").lower() == "true"
@@ -10,22 +11,26 @@ class ScopusService:
     def __init__(self):
         self.base_url = "https://api.elsevier.com/content/search/scopus"
 
-    def build_query(self, identifier, filters=None):
-        if not filters:
-            filters = {}
-
+    def build_query(self, identifier, id_type, filters):
         query_parts = []
 
-        # Identifier (AU-ID or ORCID) is optional if AF-ID is present, but we need at least one criteria.
-        if identifier:
-            if re.match(r"^\d{4}-\d{4}-\d{4}-", identifier):
+        # 1. Main Search Criteria (Author OR Affiliation)
+        if filters.get("main_af_id"):
+            # Affiliation Search Mode
+            query_parts.append(f"AF-ID({filters['main_af_id']})")
+        elif identifier:
+            # Author Search Mode
+            if id_type == "ORCID":
                 query_parts.append(f"ORCID({identifier})")
             else:
+                # Assume AU-ID
                 query_parts.append(f"AU-ID({identifier})")
 
-        if filters.get("af_id"):
-            query_parts.append(f"AF-ID({filters['af_id']})")
+            # Optional Affiliation Filter for Author
+            if filters.get("filter_af_id"):
+                query_parts.append(f"AF-ID({filters['filter_af_id']})")
 
+        # 2. Common Filters
         if filters.get("subj_area"):
             query_parts.append(f"SUBJAREA({filters['subj_area']})")
 
@@ -39,15 +44,15 @@ class ScopusService:
 
         return " AND ".join(query_parts)
 
-    def get_publications(self, identifier, api_key=None, filters=None, limit=25):
+    def get_publications(self, identifier=None, id_type=None, api_key=None, filters=None, limit=25):
         if not filters:
             filters = {}
 
-        # Validate: Need at least Identifier OR Affiliation
-        if not identifier and not filters.get("af_id"):
-             return {"error": "Please provide at least an Author ID/ORCID OR an Affiliation ID."}
+        # Validate: Need at least Identifier OR Main Affiliation
+        if not identifier and not filters.get("main_af_id"):
+             return {"error": "Lütfen en az bir Yazar ID/ORCID veya Kurum ID giriniz."}
 
-        # Resolve API Key: Argument > Secrets > Env
+        # Resolve API Key
         if not api_key:
             try:
                 api_key = st.secrets.get("SCOPUS_API_KEY")
@@ -57,12 +62,16 @@ class ScopusService:
             api_key = os.environ.get("SCOPUS_API_KEY")
 
         use_mock = MOCK_MODE_ENV or not api_key
-        full_query = self.build_query(identifier, filters)
+        full_query = self.build_query(identifier, id_type, filters)
 
         if use_mock:
-            return self._get_mock_data(full_query, limit, filters)
+            # Pass target_af_id for mock logic if available
+            target_af = filters.get("main_af_id") or filters.get("filter_af_id")
+            return self._get_mock_data(full_query, limit, target_af)
 
-        return self._fetch_from_api(full_query, api_key, limit, filters.get("af_id"))
+        # Pass target_af_id for highlighting/validation logic
+        target_af = filters.get("main_af_id") or filters.get("filter_af_id")
+        return self._fetch_from_api(full_query, api_key, limit, target_af)
 
     def _fetch_from_api(self, query, api_key, limit, target_af_id):
         headers = {
@@ -73,7 +82,7 @@ class ScopusService:
         params = {
             "query": query,
             "count": limit,
-            "view": "STANDARD", # STANDARD gives us most fields we need
+            "view": "STANDARD",
             "sort": "-coverDate"
         }
 
@@ -85,7 +94,6 @@ class ScopusService:
         except requests.exceptions.RequestException as e:
             error_msg = str(e)
             try:
-                # Try to parse Scopus XML/JSON error
                 if response is not None:
                     error_json = response.json()
                     if 'service-error' in error_json:
@@ -104,7 +112,6 @@ class ScopusService:
              entries = [entries]
 
         for entry in entries:
-            # Extract fields
             title = entry.get("dc:title", "N/A")
             journal = entry.get("prism:publicationName", "N/A")
             date_str = entry.get("prism:coverDate", "N/A")
@@ -114,15 +121,9 @@ class ScopusService:
             scopus_id = entry.get("dc:identifier", "N/A").replace("SCOPUS_ID:", "")
             doctype = entry.get("subtypeDescription", entry.get("subtype", "N/A"))
 
-            # Authors
-            # In STANDARD view, authors might not be fully listed or just 'dc:creator' (first author)
-            # Scopus Search API 'STANDARD' view usually has 'author' array? No, often just 'dc:creator'.
-            # 'COMPLETE' view has 'author'. But let's check what we get.
-            # If 'author' key exists (list of dicts), we use it.
             authors_list = []
             author_names_str = "N/A"
             if 'author' in entry:
-                # Iterate authors
                 for auth in entry['author']:
                     name = auth.get('authname', 'Unknown')
                     authors_list.append(name)
@@ -130,8 +131,6 @@ class ScopusService:
             elif 'dc:creator' in entry:
                  author_names_str = entry['dc:creator']
 
-            # Affiliation Match
-            # Check 'affiliation' array in entry
             has_target_affil = False
             if target_af_id and 'affiliation' in entry:
                 affils = entry['affiliation']
@@ -139,7 +138,6 @@ class ScopusService:
                     affils = [affils]
 
                 for aff in affils:
-                    # check 'afid'
                     if str(aff.get('afid')) == str(target_af_id):
                         has_target_affil = True
                         break
@@ -147,6 +145,7 @@ class ScopusService:
             pubs.append({
                 "title": title,
                 "journal": journal,
+                "date": date_str,
                 "year": year,
                 "times_cited": cited,
                 "doctype": doctype,
@@ -164,8 +163,7 @@ class ScopusService:
             "query_used": query
         }
 
-    def _get_mock_data(self, query, limit, filters):
-        # Generate enough mock items to test pagination logic
+    def _get_mock_data(self, query, limit, target_af):
         total_mock = 120
         count = min(limit, total_mock)
 
@@ -174,13 +172,14 @@ class ScopusService:
             mock_pubs.append({
                 "title": f"Mock Paper {i+1}: Analysis of Something",
                 "journal": "Mock Journal",
+                "date": f"2024-{i%12+1:02d}-15",
                 "year": "2024",
                 "times_cited": 10 + i,
                 "doctype": "ar",
                 "doi": f"10.1016/mock.{i}",
                 "scopus_id": f"85000{i}",
                 "authors": "Keskin S.; Doe J.",
-                "has_target_affil": True # Simulate match
+                "has_target_affil": True
             })
 
         return {
